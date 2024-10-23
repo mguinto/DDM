@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Feb  2 12:08:13 2024
+
+@author: mguinto
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+sns.set_theme(style="white", palette=None)
+#sns.set_theme()
+
+##define model parameters
+t_0 = 0 #start time
+t_end = 5 #end time
+samp_length = 100 #total number of time points
+samp_trial = 1000 #number of trials
+
+samp_startpoint = 0 ###DDM: response bias
+samp_theta1 = 0  ###DDM: mean to regress towards (if > 0, bias towards the top option)
+
+###########################################
+### PARAMETERS TO PLAY AROUND WITH (σ,κ) ##    
+###########################################
+
+###TEST/SAMPLE DIFFUSION PROCESS
+samp_sigma = 1  ###DDM: noise parameter
+samp_kappa_mean = 2.5  ###DDM: drift rate
+
+###REFERENCE DIFFUSION PROCESSES
+num_sigma = 7 #number of sigma values to check for the grid search (number of rows)
+num_kappa = 7 #number of kappa values to check for the grid search (number of columns)
+
+#set min and max values
+sigma_min = 1
+sigma_max = 3
+
+kappa_min = 0
+kappa_max = 5
+
+######################################
+######################################
+
+#in case we want variable drift rates
+samp_kappa = np.random.normal(loc=samp_kappa_mean,scale=0,size=(samp_trial,samp_length)) #scale/spread set to 0 for now
+
+##thresholds/boundaries
+upperth = 1 #upper threshold (default: 1)
+lowerth = -1 #lower threshold (default: -1)
+
+##define time axis
+t = np.linspace(t_0,t_end, samp_length)
+dt = np.mean(np.diff(t)) #time bin
+samp_y = np.zeros((samp_trial, samp_length)) #initialize y (decision coordinate)
+
+##define starting points
+for u in range(0,samp_trial):
+    samp_y[u,0] = samp_startpoint
+
+##define drift, diffusion, and gaussian noise terms
+samp_drift = lambda samp_y,t: (samp_theta1-samp_y)
+samp_diffusion = lambda samp_y,t: samp_sigma
+samp_noise = np.random.normal(loc=0.0,scale=1.0,size=(samp_trial,samp_length))*np.sqrt(dt)
+
+##solve SDE
+for u in range(0,samp_trial):
+    for i in range(1,samp_length):
+        samp_y[u,i] = samp_y[u,i-1] + samp_drift(samp_y[u,i-1],i*dt)*samp_kappa[u,i]*dt + samp_diffusion(samp_y[u,i-1],i*dt)*samp_noise[u,i]
+        if samp_y[u,i] >= upperth or samp_y[u,i] <= lowerth:
+            break
+
+##for plotting purposes
+t = np.expand_dims(t, axis=0) #add 1 to the matrix dimension
+t = np.transpose(t) #transpose
+samp_y = np.transpose(samp_y) #transpose
+samp_y[samp_y == 0] = 'nan' #drop trailing zero values after the threshold is reached
+samp_y[0,0:samp_trial] = samp_startpoint #ensure first points are "startpoints"
+samp_y[samp_y > upperth] = upperth #erase points above upper threshold
+samp_y[samp_y < lowerth] = lowerth #erase points below lower threshold
+
+##for statistical analysis
+samp_endtime = np.where(samp_y == upperth)[0] #time to reach upper threshold
+samp_endtime = samp_endtime*dt
+
+samp_other_endtime = np.where(samp_y == lowerth)[0] #time to reach lower threshold
+samp_other_endtime = samp_other_endtime*dt
+
+##plot "test" distribution
+if np.size(samp_other_endtime) != 0:
+  fig, axes = plt.subplots(nrows=3,gridspec_kw={'height_ratios': [1, 3, 1]})
+ 
+  g1=plt.subplot(311) #upper boundary passage time (endtime) distribution
+  plt.plot(samp_endtime, np.zeros_like(samp_endtime)+0.02, '.', markersize=5)
+  #plt.hist(endtime)
+  sns.kdeplot(samp_endtime, fill=True) #color='blue'
+  #plt.axis('off')
+  plt.grid(visible=None)
+  g1.tick_params(axis='x', direction='out', length=6, width=2, colors='w', grid_alpha=0.5)
+  g1.set_xlim(-0.6,5.2)
+  g1.set_title(f'$Test: \sigma = {samp_sigma}, \kappa = {samp_kappa_mean}$')
+ 
+  g2=plt.subplot(312,sharex = g1) #diffusion trajectory
+  plt.plot(t,samp_y)
+  plt.hlines(samp_startpoint,t_0-0.2,t_end,colors="black",linestyles="dotted")
+  plt.hlines(upperth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+  plt.hlines(lowerth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+  plt.hlines(samp_startpoint,t_0-0.3,t_0,colors="black",linestyles="solid")
+  plt.text(t_0-0.35,samp_startpoint, 'z', ha='right', va='center')
+  plt.ylabel("spatial/decision coordinate")
+  plt.grid(color='gainsboro',linestyle='-', linewidth=0.8)
+  g2.tick_params(direction='in')
+ 
+  g3=plt.subplot(313)  #lower boundary passage time (endtime) distribution
+  #plt.hist(other_endtime)
+  sns.kdeplot(samp_other_endtime, fill=True) #color='blue'
+  #plt.axis('off')
+  plt.plot(samp_other_endtime, np.zeros_like(samp_other_endtime)+0.02, '.', markersize=5)
+  plt.grid(visible=None)
+  g3.set_ylim(g3.get_ylim()[::-1])
+  g3.tick_params(axis='x', direction='out', length=6, width=2, colors='w', grid_alpha=0.5)
+  g3.set_xlim(-0.6,5.2)
+ 
+else: #if lower boundary is not reached
+  fig, axes = plt.subplots(nrows=2,gridspec_kw={'height_ratios': [1, 3]})
+  g1=plt.subplot(211)  #upper boundary passage time (endtime) distribution
+  #plt.hist(endtime)
+  sns.kdeplot(samp_endtime, fill=True) #color='blue'
+  plt.plot(samp_endtime, np.zeros_like(samp_endtime)+0.02, '.', markersize=5)
+  #plt.axis('off')
+  plt.grid(visible=None)
+  g1.tick_params(axis='x', direction='out', length=6, width=2, colors='w', grid_alpha=0.5)
+  g1.set_xlim(-0.6,5.2)
+  g1.set_title(f'$Test: \sigma = {samp_sigma}, \kappa = {samp_kappa_mean}$')
+ 
+  g2=plt.subplot(212,sharex = g1)
+  plt.plot(t,samp_y) #diffusion trajectory
+  plt.hlines(samp_startpoint,t_0-0.2,t_end,colors="black",linestyles="dotted")
+  plt.hlines(upperth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+  plt.hlines(lowerth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+  plt.hlines(samp_startpoint,t_0-0.3,t_0,colors="black",linestyles="solid")
+  plt.text(t_0-0.35,samp_startpoint, 'z', ha='right', va='center')
+  plt.ylabel("spatial/decision coordinate")
+  g2.tick_params(direction='in')
+  plt.xlabel("time (AU)")
+  plt.grid(color='gainsboro',linestyle='-', linewidth=0.8)
+
+plt.show()
+
+#%%
+#################################################################
+###      Grid Search: Generate reference distributions        ###    
+#################################################################
+#import scipy as sp
+from scipy import stats
+
+##define model parameters
+# t_0 = 0 #start time
+# t_end = 5 #end time
+length = 100 #total number of time points
+trial = 1000 #number of trials
+
+startpoint = 0  ###DDM: response bias
+theta1 = 0 ###DDM: mean to regress towards (if > 0, bias towards the top option)
+#theta1 = np.random.normal(loc=0.8,scale=0,size=(trial,length))
+#theta1 = np.expand_dims(np.linspace(0,1,dist), axis=0)
+
+# Moved to the first section for convenience. Uncomment if necessary
+# ######################################
+# ### PARAMETERS TO PLAY AROUND WITH ###    
+# ######################################
+# num_kappa = 11 #number of kappa values to check
+# num_sigma = 11 #number of sigma values to check
+
+# sigma_min = 0
+# sigma_max = 2
+
+# kappa_min = 0
+# kappa_max = 5
+
+#generate parameter value list
+sigma = np.expand_dims(np.linspace(sigma_min,sigma_max,num_sigma), axis=0)  ###DDM: noise parameter
+kappa = np.expand_dims(np.linspace(kappa_min,kappa_max,num_kappa), axis=0)
+
+##thresholds/boundaries
+upperth = 1 #upper threshold (default: 1)
+lowerth = -1 #lower threshold (default: -1)
+
+##define time axis
+t = np.linspace(t_0,t_end, length)
+dt = np.mean(np.diff(t)) #time bin
+y = np.zeros((num_sigma,num_kappa, trial, length))
+
+##define starting points
+for u in range(0,trial):
+    y[0:num_sigma,0:num_kappa,u,0] = startpoint
+    #z[k,u,0] = startpoint
+
+##define drift, diffusion, and gaussian noise terms
+drift = lambda y,t: y
+#diffusion = lambda y,t: sigma
+noise = np.random.normal(loc=0.0,scale=1.0,size=(num_sigma,num_kappa,trial,length))*np.sqrt(dt)
+
+##solve SDE
+for s in range(0,num_sigma):
+    for k in range(0,num_kappa):
+        for u in range(0,trial):
+            for i in range(1,length):
+                y[s,k,u,i] = y[s,k,u,i-1] + (theta1-drift(y[s,k,u,i-1],i*dt))*kappa[0,k]*dt + sigma[0,s]*noise[s,k,u,i]
+                if y[s,k,u,i] >= upperth or y[s,k,u,i] <= lowerth:
+                    break
+
+###for plotting purposes
+t = np.expand_dims(t, axis=0) #add 1 to the matrix dimension
+t = np.transpose(t) #transpose
+# y = np.transpose(y) #transpose
+#y = y.transpose((0,2,1))
+y = y.transpose((3,0,1,2))
+y[y == 0] = 'nan' #drop trailing zero values after the threshold is reached
+y[0,0:num_sigma,0:num_kappa,0:trial] = startpoint #ensure first points are "startpoints" (restore from nan)
+y[y > upperth] = upperth #erase points above upper threshold
+y[y < lowerth] = lowerth #erase points below lower threshold
+   
+endtime =[]
+for s in range(0,num_sigma):
+    endtime_kappa =[]
+    for k in range(0,num_kappa):
+        endpts = np.where(y[:,s,k,:] == upperth)[0]
+        endpts = endpts*dt
+        endtime_kappa.append(endpts)
+    endtime.append(endtime_kappa) #need padding--t0 add later
+
+other_endtime =[]
+for s in range(0,num_sigma):
+    other_endtime_kappa =[]
+    for k in range(0,num_kappa):
+        other_endpts = np.where(y[:,s,k,:] == lowerth)[0]
+        other_endpts = other_endpts*dt
+        other_endtime_kappa.append(other_endpts)
+    other_endtime.append(other_endtime_kappa)
+
+######################################
+###      PLOT DISTRIBUTIONS        ###    
+######################################
+##plots
+for distrib_sigma in range(0,num_sigma):      
+    for distrib_kappa in range(0,num_kappa):
+       
+        if np.size(other_endtime[distrib_sigma][distrib_kappa]) > 1: #both boundaries
+
+            fig, axes = plt.subplots(nrows=3,gridspec_kw={'height_ratios': [1, 3, 1]})
+            g1=plt.subplot(311)
+            #plt.hist(endtime, bins= 50)
+            sns.kdeplot(endtime[distrib_sigma][distrib_kappa], fill=True) #color='blue'
+            #plt.axis('off')
+            plt.grid(visible=None)
+            g1.tick_params(axis='x', direction='out', length=6, width=2, colors='w', grid_alpha=0.5)
+            g1.set_xlim(-0.6,5.2)
+            g1.set_title(f'$*** \sigma = {sigma[0,distrib_sigma]}, \kappa = {kappa[0,distrib_kappa]}***$')
+           
+            g2=plt.subplot(312,sharex = g1)
+            plt.plot(t,y[:,distrib_sigma,distrib_kappa,:])
+            plt.hlines(startpoint,t_0-0.2,t_end,colors="black",linestyles="dotted")
+            plt.hlines(upperth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+            plt.hlines(lowerth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+            plt.hlines(startpoint,t_0-0.3,t_0,colors="black",linestyles="solid")
+            plt.text(t_0-0.35,startpoint, 'z', ha='right', va='center')
+            plt.ylabel("spatial/decision coordinate")
+            plt.grid(color='gainsboro',linestyle='-', linewidth=0.8)
+            g2.tick_params(direction='in')
+         
+           
+            g3=plt.subplot(313)
+            #plt.hist(other_endtime, bins=50)
+            sns.kdeplot(other_endtime[distrib_sigma][distrib_kappa], fill=True) #color='blue'
+            #plt.axis('off')
+            plt.grid(visible=None)
+            g3.set_ylim(g3.get_ylim()[::-1])
+            g3.tick_params(axis='x', direction='out', length=6, width=2, colors='w', grid_alpha=0.5)
+            g3.set_xlim(-0.6,5.2)
+        else: #lower boundary is not reached
+            fig, axes = plt.subplots(nrows=2,gridspec_kw={'height_ratios': [1, 3]})
+            g1=plt.subplot(211)
+            #plt.hist(endtime)
+            sns.kdeplot(endtime[distrib_sigma][distrib_kappa], fill=True) #color='blue'
+            #plt.axis('off')
+            plt.grid(visible=None)
+            g1.tick_params(axis='x', direction='out', length=6, width=2, colors='w', grid_alpha=0.5)
+            g1.set_xlim(-0.6,5.2)
+            g1.set_title(f'$*** \sigma = {sigma[0,distrib_sigma]}, \kappa = {kappa[0,distrib_kappa]}***$')
+             
+            g2=plt.subplot(212,sharex = g1)
+            plt.plot(t,y[:,distrib_sigma,distrib_kappa,:])
+            plt.hlines(startpoint,t_0-0.2,t_end,colors="black",linestyles="dotted")
+            plt.hlines(upperth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+            plt.hlines(lowerth,t_0-0.2,t_end,colors="red",linestyles="dotted")
+            plt.hlines(startpoint,t_0-0.3,t_0,colors="black",linestyles="solid")
+            plt.text(t_0-0.35,startpoint, 'z', ha='right', va='center')
+            plt.ylabel("spatial/decision coordinate")
+            g2.tick_params(direction='in')
+            plt.xlabel("time (AU)")
+            plt.grid(color='gainsboro',linestyle='-', linewidth=0.8)
+
+#Save figures
+#           plt.savefig("value123" + "_" + str(distrib_sigma) + "-" + str(distrib_kappa) + ".png")
+       
+plt.show()  
+   
+
+#%%
+#################################################################
+###                FOR PARAMETER ESTIMATION                   ###    
+#################################################################
+
+######################################
+##  VIA KOLMOGOROV-SMIRNOV TEST    ###    
+######################################
+
+#Initialize array objects
+ks_pval = [] #for KS test pvalue
+ks_stat = [] #for test statistic
+
+#get KS statistic
+for s in range(0,num_sigma):
+    for k in range(0,num_kappa):
+        if np.size(endtime[s][k]) > 1:
+            ks_line = stats.kstest(samp_endtime, endtime[s][k])
+            ks_stat.append(ks_line[0])
+            ks_pval.append(ks_line[1])
+        else:
+            ks_line = 0
+            ks_stat.append(ks_line)
+            ks_pval.append(ks_line)
+       
+ks_pval = np.reshape(ks_pval, (num_sigma, num_kappa))
+ks_stat = np.reshape(ks_stat, (num_sigma, num_kappa))
+
+df_pval = pd.DataFrame(ks_pval) #convert to DataFrame
+df_stat = pd.DataFrame(ks_stat)
+
+#prepare labels for heatmap
+sigma_label = np.squeeze(sigma,0).astype(str)
+kappa_label = np.squeeze(kappa,0).astype(str)
+
+row = []
+for n in range(0,np.size(sigma_label)):
+    trunc_label_sigma = sigma_label[n][:4]
+    row.append(trunc_label_sigma)
+   
+col = []
+for n in range(0,np.size(kappa_label)):
+    trunc_label_kappa = kappa_label[n][:4]
+    col.append(trunc_label_kappa)
+   
+#heatmap x- and y-labels
+df_pval.columns = col
+df_pval.index = row
+df_stat.columns = col
+df_stat.index = row
+
+#import matplotlib.ticker as mtick
+##plot KS test p-values
+fig = sns.heatmap(df_pval, linewidth=.5, annot=True, fmt=".2f") #cmap="Blues"
+#fig = sns.heatmap(df_pval, linewidth=.5, annot=df_pval.rank(axis="columns"))
+fig.set_title('p-value, Kolmogorov-Smirnov test',fontsize = 15)
+plt.xlabel('$\kappa$ (drift rate)', fontsize = 12)
+plt.ylabel('$\sigma$ (diffusion constant)', fontsize = 12)
+fig.xaxis.tick_bottom()
+fig.yaxis.tick_left()
+plt.show()
+#plt.savefig("KS" + "_" + str(distrib_sigma) + "-" + str(distrib_kappa) + ".png")
+
+#KS statistic
+# fig2 = sns.heatmap(df_stat, linewidth=.5, annot=False, fmt=".1f")
+# fig2.set_title('statistic, Kolmogorov-Smirnov test',fontsize = 15)
+# plt.xlabel('$\kappa$ (drift rate)', fontsize = 12)
+# plt.ylabel('$\sigma$ (diffusion constant)', fontsize = 12)
+# fig2.yaxis.set_major_formatter(mtick.FormatStrFormatter('%.1f'))
+# fig2.xaxis.tick_bottom()
+# fig2.yaxis.tick_left()
+# plt.show()
+
+##data transformation for better contrast
+fig = sns.heatmap(df_pval**0.2, linewidth=.5, annot=True, fmt=".2f") #cmap="Blues"
+#fig = sns.heatmap(df_pval, linewidth=.5, annot=df_pval.rank(axis="columns"))
+fig.set_title('p-value, Kolmogorov-Smirnov test (transformed data)',fontsize = 15)
+plt.xlabel('$\kappa$ (drift rate)', fontsize = 12)
+plt.ylabel('$\sigma$ (diffusion constant)', fontsize = 12)
+fig.xaxis.tick_bottom()
+fig.yaxis.tick_left()
+plt.show()
+
+pval_max = np.max(df_pval.values)
+index_pval_max = df_pval.stack().index[np.argmax(df_pval.values)]
+
+###SUMMARY
+print(f'true sigma: {samp_sigma} \ntrue kappa : {samp_kappa_mean}')
+print(f'\nmax p-value : {pval_max} \nsigma, kappa : {index_pval_max}')
+
+#%%
+######################################
+##  VIA LOG LIKELIHOOD  ###    
+######################################
+#import numpy as np
+from scipy.stats import norm
+
+#Initialize array objects
+#We try two ways of calculating the log likehood values
+#Short version using the norm function: -np.sum(np.log(norm.pdf(samp_endtime,mean,sd)))
+#Formula: formula = -(-(summed_term[a,b]/(2*(sd_bank[a,b]**2)))-(0.5*np.size(endtime[a][b])*np.log(2*np.pi*(sd_bank[a,b]**2)))-(0.5*np.log(2*np.pi)*np.size(endtime[a][b])))
+#Results should be equivalent up to additive and multiplicative constants
+
+loglik = [] #log likelihood table (using the norm function)
+loglik_formula = [] #log likelihood table (using explicit formula)
+sum_repo = [] #sum of exponent term
+mean_bank = [] #collect mean values for every passage time dataset
+sd_bank = []   #collect standard deviation values for every passage time dataset
+
+
+#using the norm function
+for s in range(0,num_sigma): #sigma: row index
+    for k in range(0,num_kappa): #kappa: column index
+        if np.size(endtime[s][k]) > 1: #if the diffusion process reaches the threshold at least twice
+            mean,sd = norm.fit(endtime[s][k])
+            mean_bank.append(mean) #for later
+            sd_bank.append(sd) #for later
+            log_likelihood = np.sum(np.log(norm.pdf(samp_endtime,mean,sd)))
+            loglik.append(log_likelihood)
+        else:
+            zero_pad = 0
+            loglik.append(zero_pad)
+            mean_bank.append(zero_pad)
+            sd_bank.append(zero_pad)
+
+mean_bank = np.reshape(mean_bank, (num_sigma, num_kappa)) #fit the right dimensions
+sd_bank = np.reshape(sd_bank, (num_sigma, num_kappa))
+
+#using the formula
+sum_repo = [] #elements to be summed
+sum_repo_repo = [] #collection of elements to be summed
+summed_term = [] #summed elements (same dimension as num_sigma*num_kappa)
+for s in range(0,num_sigma):
+    for k in range(0,num_kappa):
+        if np.size(endtime[s][k]) > 1:
+            for i in range(0,np.size(samp_endtime)):
+                sum_term = (samp_endtime[i]-mean_bank[s][k])**2 #evaluate expression (sum term)
+                sum_repo.append(sum_term)  #collection of elements to be summed
+            sum_repo_repo.append(sum_repo) #store all sums in one array
+            sum_repo = []
+        else:
+            zero_pad = 0
+            sum_repo_repo.append(zero_pad)
+       
+for sk in range(0,num_sigma*num_kappa):
+       
+        if np.size(sum_repo_repo[sk]) > 1:
+            summer = sum(sum_repo_repo[sk]) #get sum
+            summed_term.append(summer) #summed elements
+        else:
+            zero_pad = 0
+            summed_term.append(zero_pad)
+           
+summed_term = np.reshape(summed_term, (num_sigma, num_kappa)) #fit the right dimensions          
+         
+formula_bank = np.zeros((num_sigma,num_kappa))
+for a in range(0,num_sigma):
+    for b in range(0,num_kappa):
+        if summed_term[a][b] > 1:
+            formula = (-(summed_term[a,b]/(2*(sd_bank[a,b]**2)))-(0.5*np.size(endtime[a][b])*np.log(2*np.pi*(sd_bank[a,b]**2)))-(0.5*np.log(2*np.pi)*np.size(endtime[a][b])))
+            formula_bank[a,b] = formula
+        else:
+            formula_bank[a,b] = 0                                                                
+                                                                                               
+                                                       
+loglik = np.reshape(loglik, (num_sigma, num_kappa)) #fit the right dimensions
+
+df_loglik = pd.DataFrame(loglik) #convert to DataFrame
+df_loglik[df_loglik == 0] = np.min(df_loglik.values)*3 # extremely negative number
+df_loglik.columns = col
+df_loglik.index = row
+
+df_formula_bank = pd.DataFrame(formula_bank) #convert to DataFrame
+df_formula_bank[df_formula_bank == 0] = np.min(df_formula_bank.values)*3
+df_formula_bank[df_formula_bank == 0] = -100000 # extremely negative number
+df_formula_bank.columns = col
+df_formula_bank.index = row
+
+##heatmap of log likelihood (computed using the norm function)
+fig = sns.heatmap(df_loglik, linewidth=.5, annot=df_loglik.rank(axis="columns")) #cmap="Blues"
+#fig = sns.heatmap(df_pval, linewidth=.5, annot=df_pval.rank(axis="columns"))
+fig.set_title('log likelihood',fontsize = 15)
+plt.xlabel('$\kappa$ (drift rate)', fontsize = 12)
+plt.ylabel('$\sigma$ (diffusion constant)', fontsize = 12)
+fig.xaxis.tick_bottom()
+fig.yaxis.tick_left()
+plt.show()
+
+##heatmap of log likelihood (computed using the formula)
+fig = sns.heatmap(df_formula_bank, linewidth=.5, annot=df_formula_bank.rank(axis="columns")) #cmap="Blues"
+#fig = sns.heatmap(df_pval, linewidth=.5, annot=df_pval.rank(axis="columns"))
+fig.set_title('log likelihood (formula)',fontsize = 15)
+plt.xlabel('$\kappa$ (drift rate)', fontsize = 12)
+plt.ylabel('$\sigma$ (diffusion constant)', fontsize = 12)
+fig.xaxis.tick_bottom()
+fig.yaxis.tick_left()
+plt.show()
+
+###SUMMARY
+loglik_max = np.max(df_loglik.values)
+index_loglik = df_loglik.stack().index[np.argmax(df_loglik.values)]
+
+loglik_formula_max = np.max(df_formula_bank.values)
+index_loglik_formula = df_formula_bank.stack().index[np.argmax(df_formula_bank.values)]
+
+#print(f'true sigma: {samp_sigma} \ntrue kappa : {samp_kappa_mean}')
+print(f'\nmax log likelihood: {loglik_max} \nsigma, kappa : {index_loglik}')
+
+#print(f'formula: true sigma: {samp_sigma} \ntrue kappa : {samp_kappa_mean}')
+print(f'\nFormula: max log likelihood: {loglik_formula_max} \nsigma, kappa : {index_loglik_formula}')
+
+#%%
+###########################################################
+###  NUMBER OF SUCCESSFUL PASSAGES (OVER THE THRESHOLD) ###    
+###########################################################
+passage_number = np.zeros((num_sigma,num_kappa)) #passage counts
+
+for s in range(0,num_sigma):
+    for k in range(0,num_kappa):
+         passage_number_ = np.size(endtime[s][k])
+         passage_number[s,k] = passage_number_                      
+   
+df_passage_number = pd.DataFrame(passage_number)
+
+df_passage_number.columns = col
+df_passage_number.index = row
+
+#heatmap of passage counts
+fig = sns.heatmap(df_passage_number, linewidth=.5, annot=True, fmt=".0f") #cmap="Blues"
+fig.set_title(f'Passage ({length} timepoints, {trial} trials)',fontsize = 15)
+plt.xlabel('$\kappa$ (drift rate)', fontsize = 12)
+plt.ylabel('$\sigma$ (diffusion constant)', fontsize = 12)
+fig.xaxis.tick_bottom()
+fig.yaxis.tick_left()
+plt.show()
+
+#%%
+
+# ###TESTING THE LOG LIKELIHOOD SCRIPT
+
+# #set mean and sd of test Gaussian
+# mean_test = 3
+# sd_test = 2
+# gauss_dist = np.random.normal(mean_test,sd_test,10000)
+
+# #number of mean and sd points to test
+# mm = 10
+# ss = 10
+
+# ##log likelihood from norm function
+# loglik_normfunc = np.zeros((mm,ss))
+# for q in range(0,mm):
+#     for w in range(0,ss):
+#             log_likelihood_o = np.sum(np.log(norm.pdf(gauss_dist,q,w)))
+#             loglik_normfunc[q,w] = log_likelihood_o
+
+                                                                   
+# sns.heatmap(loglik_normfunc, vmin = -40000, vmax = -20000)
+# plt.xlabel('standard deviation', fontsize = 12)
+# plt.ylabel('mean', fontsize = 12)
+# plt.show()
+
+
+# ##log likelihood from formula
+# sum_repo = [] #elements to be summed
+# sum_repo_repo = [] #collection of elements to be summed
+# summed_term = [] #summed elements (same dimension as num_sigma*num_kappa)
+# #for s in range(0,10):
+# for k in range(0,mm):
+#         for i in range(0,np.size(gauss_dist)):
+#             sum_term = (gauss_dist[i]-k)**2 #evaluate expression (sum term)
+#             sum_repo.append(sum_term)  #collection of elements to be summed
+#         sum_repo_repo.append(sum_repo) #store all sums in one array
+#         sum_repo = []
+       
+# for sk in range(0,mm):
+   
+#             summer = sum(sum_repo_repo[sk]) #get sum
+#             summed_term.append(summer) #summed elements          
+         
+# loglik_formula = np.zeros((mm,ss))
+# for i in range(0,mm):
+#     for b in range(0,ss):
+#             formula = (-(summed_term[i]/(2*(b**2)))-(0.5*10000*np.log(2*np.pi*(b**2)))-(0.5*np.log(2*np.pi)*10000))
+#             loglik_formula[i,b] = formula
+                                                                   
+# fig = sns.heatmap(loglik_formula,vmin = -40000, vmax = -31000)
+# #vmax = (np.nanmax(loglik_formula)/3),vmin = (np.nanmin(loglik_formula)/3),
+# plt.xlabel('standard deviation', fontsize = 12)
+# plt.ylabel('mean', fontsize = 12)
+# #fig.set_title('log likelihood - formula', fontsize = 12) 

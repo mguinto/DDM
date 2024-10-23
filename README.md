@@ -1,7 +1,7 @@
-# DDM
+# DDM (a.k.a. drift-diffusion model or diffusion decision model)
 Explorations on the drift-diffusion model (and its possible applications to understanding decision making in mice)
 
-> Ratcliff's drift-diffusion model, Ornstein-Uhlenbeck (mean-reverting) process, Levy processes 
+> Roger Ratcliff's drift-diffusion model, Ornstein-Uhlenbeck (mean-reverting) process, Levy processes 
 
 <img width="853" alt="Screenshot 2024-10-23 at 20 49 20" src="https://github.com/user-attachments/assets/6f70c609-ee0c-4fdb-b574-fd82eca6fd9c">
 <img width="850" alt="Screenshot 2024-10-23 at 20 49 31" src="https://github.com/user-attachments/assets/fbf82a46-d9c5-4be1-b804-ad8664088b37">
